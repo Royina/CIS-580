@@ -1,65 +1,59 @@
-"""
-utils functions for part 1 (Barcelona)
-STUDENTS SHOULDN'T NEED TO CHANGE THIS
-
-"""
-
 import numpy as np
-from matplotlib.path import Path
+import matplotlib.pyplot as plt
+import os
+import os.path as osp
+import imageio
+from tqdm import tqdm
+from transforms3d.euler import mat2euler, euler2mat
+import pyrender
+import trimesh
+import cv2
+from dataloader import load_middlebury_data
+
+EPS = 1e-8
 
 
-def calculate_interior_pts(image_size, corners):
-    """ 
-    Calculate_interior_pts takes in the size of an image and a set of corners
-    that define a polygon in the image, and returns all (x,y) points within
-    the polygon
-    
-    Input:
-        image_size: size of image in [y,x]
-        corners: the four corners of a polygon in [x,y] format
-    Returns:
-        interior_pts: coordinates of points inside polygon in [x,y] format
-        
-    """
+def add_coordinate(scene, R, T, axis_len=0.05, sections=6, ratio=20):
+    T_base = np.eye(4)
+    T_base[:3, :3] = R
+    T_base[:3, 3] = T
 
-    # YOU SHOULDN'T NEED TO CHANGE THIS
-    path = Path(corners)
+    _trans = np.eye(4)
+    _trans[:3, :3] = euler2mat(0, np.pi / 2, 0, "szyz")
+    _trans[:3, 3] = np.array([axis_len / 2, 0.0, 0.0])
+    mx = trimesh.creation.cylinder(
+        axis_len / ratio,
+        axis_len,
+        transform=T_base @ _trans,
+        sections=sections,
+    )
+    mx.visual.vertex_colors = np.ones(mx.vertices.shape) * np.array([[1.0, 0.0, 0.0]])
+    scene.add(pyrender.Mesh.from_trimesh(mx))
 
-    xx, yy = np.meshgrid(range(image_size[1]), range(image_size[0]))
-    xxyy = np.stack([xx.ravel(), yy.ravel()], 1)
+    _trans = np.eye(4)
+    _trans[:3, :3] = euler2mat(0, np.pi / 2, 0, "szxz")
+    _trans[:3, 3] = np.array([0.0, axis_len / 2, 0.0])
+    my = trimesh.creation.cylinder(
+        axis_len / ratio, axis_len, transform=T_base @ _trans, sections=sections
+    )
+    my.visual.vertex_colors = np.ones(my.vertices.shape) * np.array([[0.0, 1.0, 0.0]])
+    scene.add(pyrender.Mesh.from_trimesh(my))
 
-    interior_ind = path.contains_points(xxyy)
-    interior_pts = xxyy[interior_ind]
-    
-    return interior_pts
+    _trans = np.eye(4)
+    _trans[:3, 3] = np.array([0.0, 0.0, axis_len / 2])
+    mz = trimesh.creation.cylinder(
+        axis_len / ratio, axis_len, transform=T_base @ _trans, sections=sections
+    )
+    mz.visual.vertex_colors = np.ones(mz.vertices.shape) * np.array([[0.0, 0.0, 1.0]])
+    scene.add(pyrender.Mesh.from_trimesh(mz))
+
+    return scene
 
 
-def inverse_warping(img_initial, img_final, pts_initial, pts_final):
-    """ 
-    takes two images and a set of correspondences between them, 
-    and warps all the pts_inital in img_initial to the pts_final in img_final
+def viz_camera_poses(DATA):
+    scene = pyrender.Scene()
 
-    Input:
-        img_initial: initial image on top of which we want to overlay img_final
-        img_final:   target image to lay on top of img_initial
-        pts_initial: Nx2 matrix of (x,y) coordinates of points in video frame
-        pts_final:   Nx2 matrix of (x,y) coordinates of points in penn logo
-    Returns:
-        projected_img: 
-        
-    """   
-    
-    # YOU SHOULDN'T NEED TO CHANGE THIS
-    pts_final = pts_final.astype(int)
-    pts_initial = pts_initial.astype(int)
-    
-    projected_img = img_initial.copy()
-    for i in range(3):
-        sub_img_i = img_initial[:,:,i][pts_initial[:,1], pts_initial[:,0]]
-        sub_img_f = img_final[:,:,i][pts_final[:,1], pts_final[:,0]]
-        
-        # sub_img = sub_img_i*1 + sub_img_f*1
-        sub_img = sub_img_f*1 
-        projected_img[:,:,i][pts_initial[:,1], pts_initial[:,0]] = sub_img
-        
-    return projected_img
+    for data in DATA:
+        scene = add_coordinate(scene, data["R"].T, -(data["R"].T @ data["T"][:, None])[:, 0])
+    pyrender.Viewer(scene, use_raymond_lighting=True)
+    return
